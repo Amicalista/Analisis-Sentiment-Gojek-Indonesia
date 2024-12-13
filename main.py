@@ -4,34 +4,25 @@ from langdetect import detect
 import matplotlib.pyplot as plt
 from datetime import datetime
 import re
-
 import logging
+import os
+from github import Github
 
 # Konfigurasi logging
 logging.basicConfig(
-    level=logging.DEBUG,  # Level log
-    format="%(asctime)s - %(levelname)s - %(message)s",  # Format log
+    level=logging.DEBUG,
+    format="%(asctime)s - %(levelname)s - %(message)s",
     handlers=[
-        logging.StreamHandler(),  # Log ke console
-        logging.FileHandler("app_debug.log")  # Simpan log ke file
+        logging.StreamHandler(),
+        logging.FileHandler("app_debug.log")
     ]
 )
-
-# Debug untuk modul langdetect
-try:
-    from langdetect import detect
-    logging.info("Pustaka 'langdetect' berhasil dimuat.")
-except ModuleNotFoundError:
-    logging.critical("Pustaka 'langdetect' tidak ditemukan! Pastikan diinstal dengan benar.")
-    raise  # Untuk menghentikan program jika dependensi penting tidak ada
-
 
 # Kamus kata positif dan negatif untuk analisis Bahasa Indonesia
 positive_words = ["baik", "puas", "hebat", "bagus", "indah", "terima kasih", "senang", "suka", "luar biasa", "memuaskan", "ramah", "cepat", "mantap", "bagus sekali", "menyenangkan"]
 negative_words = ["buruk", "jelek", "kecewa", "benci", "sedih", "marah", "tidak puas", "payah", "mengecewakan", "parah", "lambat", "sombong", "melelahkan", "tidak ramah", "parah sekali"]
 
 def preprocess_text(text):
-    # Membersihkan teks dari tanda baca dan karakter khusus
     text = re.sub(r'[^\w\s]', '', text)
     text = re.sub(r'\s+', ' ', text).strip().lower()
     return text
@@ -48,15 +39,12 @@ def analyze_sentiment_id(text):
     else:
         return "Netral", 0
 
-# Fungsi untuk mendeteksi bahasa
 def detect_language(text):
     try:
-        lang = detect(text)
-        return lang
+        return detect(text)
     except:
         return "unknown"
 
-# Fungsi untuk menyimpan data ke CSV
 def log_analysis(user_input, sentiment, score, lang):
     log_data = {
         "Timestamp": [datetime.now().strftime("%Y-%m-%d %H:%M:%S")],
@@ -68,13 +56,38 @@ def log_analysis(user_input, sentiment, score, lang):
     log_df = pd.DataFrame(log_data)
     try:
         log_df.to_csv("user_analysis_log.csv", mode="a", index=False, header=False)
+        update_github_log()
     except Exception as e:
         st.error(f"Gagal menyimpan log: {e}")
 
-# Desain Tampilan dengan Streamlit
+def update_github_log():
+    try:
+        # Ambil token dari environment variable
+        github_token = os.getenv("GITHUB_TOKEN")
+        if not github_token:
+            raise Exception("Token GitHub tidak ditemukan di environment variable.")
+
+        # Nama repositori di GitHub
+        repo_name = "Amicalista/Analisis-Sentiment-Gojek-Indonesia"
+        file_path = "user_analysis_log.csv"
+
+        # Autentikasi ke GitHub
+        g = Github(github_token)
+        repo = g.get_repo(repo_name)
+
+        # Ambil file dari repositori
+        contents = repo.get_contents(file_path)
+        with open(file_path, "r") as file:
+            content = file.read()
+
+        # Perbarui file di GitHub
+        repo.update_file(contents.path, "Update log file", content, contents.sha)
+        logging.info("Log berhasil diperbarui di GitHub.")
+    except Exception as e:
+        logging.error(f"Gagal memperbarui log di GitHub: {e}")
+
 st.set_page_config(page_title="Aplikasi Analisis Sentimen", page_icon="📊", layout="wide")
 
-# Header
 st.title("📊 Analisis Sentimen Aplikasi Gojek Indonesia")
 st.markdown("""
 Aplikasi ini memungkinkan Anda untuk menganalisis sentimen teks baik secara manual maupun dari file CSV yang diunggah.
@@ -83,32 +96,30 @@ Aplikasi ini memungkinkan Anda untuk menganalisis sentimen teks baik secara manu
 
 # Input teks manual
 st.subheader("1. Masukkan Teks untuk Analisis")
-input_text = st.text_area("Masukkan teks untuk dianalisis:", height=150)
+input_text = st.text_area("Masukkan teks untuk dianalisis:", height=150, key="input_text_area")
 
-if input_text:
-    lang = detect_language(input_text)
-    if lang == "id":
-        sentiment, score = analyze_sentiment_id(input_text)
-    else:
-        sentiment, score = "Tidak Diketahui", "N/A"
+if st.button("Analisis Sentimen"):
+    if input_text:
+        lang = detect_language(input_text)
+        if lang == "id":
+            sentiment, score = analyze_sentiment_id(input_text)
+        else:
+            sentiment, score = "Tidak Diketahui", "N/A"
 
-    # Tampilkan hasil
-    st.markdown("**Hasil Analisis Sentimen:**")
-    st.write(f"Sentimen: **{sentiment}**")
-    st.write(f"Skor Sentimen (nilai numerik): **{score}**")
-    st.write(f"Bahasa yang terdeteksi: **{lang}**")
+        st.markdown("**Hasil Analisis Sentimen:**")
+        st.write(f"Sentimen: **{sentiment}**")
+        st.write(f"Skor Sentimen (nilai numerik): **{score}**")
+        st.write(f"Bahasa yang terdeteksi: **{lang}**")
 
-    # Simpan hasil ke log
-    log_analysis(input_text, sentiment, score, lang)
+        log_analysis(input_text, sentiment, score, lang)
 
-    # Visualisasi hasil sentimen individu
-    if score != "N/A":
-        colors = {"Positif": "green", "Negatif": "red", "Netral": "gray"}
-        fig, ax = plt.subplots()
-        ax.bar([sentiment], [score], color=colors.get(sentiment, "blue"))
-        ax.set_title("Hasil Analisis Sentimen")
-        ax.set_ylabel("Skor")
-        st.pyplot(fig)
+        if score != "N/A":
+            colors = {"Positif": "green", "Negatif": "red", "Netral": "gray"}
+            fig, ax = plt.subplots()
+            ax.bar([sentiment], [score], color=colors.get(sentiment, "blue"))
+            ax.set_title("Hasil Analisis Sentimen")
+            ax.set_ylabel("Skor")
+            st.pyplot(fig)
 
 # Unggah file CSV untuk analisis
 st.subheader("2. Unggah File CSV untuk Analisis Sentimen")
@@ -117,9 +128,8 @@ uploaded_file = st.file_uploader("Pilih file CSV", type=["csv"])
 if uploaded_file is not None:
     df = pd.read_csv(uploaded_file)
     st.markdown("**Data yang Diupload:**")
-    st.dataframe(df)  # Menampilkan semua baris data dari file CSV
+    st.dataframe(df)
 
-    # Meminta pengguna memilih kolom teks jika tidak ada kolom 'review'
     text_column = st.selectbox("Pilih kolom teks untuk dianalisis:", df.columns)
 
     if text_column:
@@ -127,13 +137,11 @@ if uploaded_file is not None:
         df[['sentiment', 'sentiment_score']] = df[text_column].apply(lambda x: pd.Series(analyze_sentiment_id(x)))
 
         st.markdown("**Hasil Analisis Sentimen:**")
-        st.dataframe(df[[text_column, 'sentiment', 'sentiment_score']])  # Menampilkan hasil analisis
+        st.dataframe(df[[text_column, 'sentiment', 'sentiment_score']])
 
-        # Simpan hasil ke log
         for _, row in df.iterrows():
             log_analysis(row[text_column], row['sentiment'], row['sentiment_score'], "id")
 
-        # Visualisasi distribusi sentimen
         sentiment_counts = df['sentiment'].value_counts()
         fig, ax = plt.subplots()
         sentiment_counts.plot(kind='bar', color=['green', 'red', 'gray'], ax=ax)
@@ -143,4 +151,3 @@ if uploaded_file is not None:
         st.pyplot(fig)
     else:
         st.warning("Kolom teks tidak dipilih. Pastikan memilih kolom yang berisi teks.")
-
